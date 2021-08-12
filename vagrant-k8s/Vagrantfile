@@ -1,0 +1,92 @@
+# frozen_string_literal: true
+
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+IMAGE_NAME = 'bento/ubuntu-20.04'
+NODES = 2
+K8S_VER = '1.21.3-00'
+PROVIDER = ENV['PROVIDER'] || 'virtualbox'
+
+# Delete a potentially existing kubeconfig.
+# This is copied from the master once it is initialised.
+File.delete('kubeconfig') if ARGV[0] == 'up' && File.exist?('kubeconfig')
+
+# noinspection RubyResolve
+# rubocop:disable Metrics/BlockLength
+Vagrant.configure('2') do |config|
+  # config.ssh.insert_key = false
+
+  # noinspection RubyResolve
+  config.vm.provider PROVIDER do |v|
+    v.memory = 2048
+    v.cpus = 2
+  end
+
+  # noinspection RubyResolve
+  config.vm.define 'k8s-master' do |master|
+    master.vm.box = IMAGE_NAME
+    master.vm.network 'private_network', ip: '192.168.50.10'
+    master.vm.hostname = 'k8s-master'
+  end
+
+  (1..NODES).each do |i|
+    # noinspection RubyResolve
+    config.vm.define "node-#{i}" do |node|
+      node.vm.box = IMAGE_NAME
+      node.vm.network 'private_network', ip: "192.168.50.#{i + 10}"
+      node.vm.hostname = "node-#{i}"
+    end
+  end
+
+  # noinspection RubyResolve
+  config.vm.define 'controller' do |controller|
+    # noinspection DuplicatedCode
+    controller.vm.box = IMAGE_NAME
+    controller.vm.network 'private_network', ip: '192.168.50.5'
+    controller.vm.hostname = 'controller'
+    # noinspection RubyResolve
+    controller.vm.provider PROVIDER do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+
+    # noinspection RubyResolve
+    if Vagrant::Util::Platform.windows?
+      config.vm.synced_folder '../', '/vagrant', owner: 'vagrant', mount_options: ['dmode=700,fmode=600']
+    else
+      config.vm.synced_folder '../', '/vagrant', owner: 'vagrant'
+    end
+
+    # noinspection RubyResolve
+    controller.vm.provision :ansible_local do |ansible|
+      ansible.playbook = 'vagrant-k8s/provisioning/playbook.yml'
+      ansible.config_file = 'vagrant-k8s/provisioning/ansible.cfg'
+      ansible.install = true
+      ansible.become = true
+      ansible.limit = 'all_groups'
+      ansible.groups = {
+        'master' => ['k8s-master'],
+        'nodes' => [], # Will be appended to below.
+        'all_groups:children' => %w[master nodes],
+        'all_groups:vars' => { 'k8s_version' => K8S_VER }
+      }
+      ansible.host_vars = {
+        'k8s-master' => {
+          'ansible_host' => '192.168.50.10',
+          'ansible_ssh_private_key_file' => "/vagrant/vagrant-k8s/.vagrant/machines/k8s-master/#{PROVIDER}/private_key"
+        }
+      }
+      (1..NODES).each do |i|
+        node_conf = {
+          'ansible_host' => "192.168.50.#{i + 10}",
+          'ansible_ssh_private_key_file' => "/vagrant/vagrant-k8s/.vagrant/machines/node-#{i}/#{PROVIDER}/private_key"
+        }
+        # noinspection RubyResolve
+        ansible.host_vars.merge!("node-#{i}": node_conf)
+        ansible.groups['nodes'].append("node-#{i}")
+      end
+    end
+  end
+end
+# rubocop:enable Metrics/BlockLength

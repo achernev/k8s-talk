@@ -1,0 +1,23 @@
+*.sw[op]
+/.idea
+
+# EasyRSA.
+/easyrsa/*
+!/easyrsa/.gitkeep
+
+# Kubernetes.
+/vagrant-k8s/.vagrant
+/vagrant-k8s/kubeconfig
+
+# Kubernetes certificate directory.
+/vagrant-k8s/provisioning/roles/k8s/files/ca.crt
+
+# Gitlab.
+/vagrant-gitlab/.vagrant
+/vagrant-gitlab/gitlab-root-password
+/vagrant-gitlab/provisioning/roles/gitlab-ce/files/gitlab-k8s-admin-token
+/vagrant-gitlab/provisioning/roles/gitlab-ce/files/k8s-ca-certificate
+
+# Gitlab certificate directory.
+/vagrant-gitlab/provisioning/roles/common/files/*
+!/vagrant-gitlab/provisioning/roles/common/files/.gitkeep

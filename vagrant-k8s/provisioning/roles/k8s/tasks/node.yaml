@@ -1,0 +1,6 @@
+---
+- name: Join cluster
+  shell: "{{ hostvars[groups['master'][0]].join_command }} >> node-joined.txt"
+  args:
+    chdir: $HOME
+    creates: node-joined.txt

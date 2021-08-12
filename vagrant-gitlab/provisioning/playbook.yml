@@ -1,0 +1,10 @@
+---
+- hosts:
+    - gitlab
+  roles:
+    - gitlab-ce
+
+- hosts:
+    - runner
+  roles:
+    - gitlab-runner

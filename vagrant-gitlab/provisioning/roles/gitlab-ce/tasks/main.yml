@@ -1,0 +1,151 @@
+---
+- name: Install prerequisites
+  apt:
+    name: "{{ packages }}"
+    state: present
+    update_cache: yes
+  vars:
+    packages:
+      - ca-certificates
+      - curl
+      - debian-archive-keyring
+      - openssh-server
+      - perl
+      - tzdata
+      - postfix
+
+- name: Create CA certificate directory
+  file:
+    path: /usr/local/share/ca-certificates/easyrsa
+    state: directory
+    mode: 0755
+
+- name: Copy CA certificate
+  copy:
+    src: roles/common/files/ca.crt
+    dest: /usr/local/share/ca-certificates/easyrsa/ca.crt
+
+- name: Add CA certificate to system store
+  lineinfile:
+    path: /etc/ca-certificates.conf
+    regexp: '^easyrsa/ca\.crt$'
+    line: 'easyrsa/ca.crt'
+    state: present
+  notify:
+    - update ca certs
+
+- name: Flush handlers
+  meta: flush_handlers
+
+- name: Add apt signing key for Gitlab
+  apt_key:
+    url: https://packages.gitlab.com/gitlab/gitlab-ce/gpgkey
+    state: present
+
+- name: Add Gitlab apt repository
+  apt_repository:
+    repo: deb https://packages.gitlab.com/gitlab/gitlab-ce/ubuntu/ focal main
+    state: present
+    filename: gitlab-ce
+
+- name: Install Gitlab
+  apt:
+    name: gitlab-ce
+    state: present
+    update_cache: yes
+
+- name: Create Gitlab certificate directory
+  file:
+    path: /etc/gitlab/ssl
+    state: directory
+    mode: 0700
+
+- name: Copy Gitlab certificate and key
+  copy:
+    src: "roles/common/files/{{ item }}"
+    dest: "/etc/gitlab/ssl/{{ item }}"
+    owner: root
+    group: root
+    mode: 0400
+  with_items:
+    - gitlab.example.com.crt
+    - gitlab.example.com.key
+
+- name: Configure Gitlab
+  template:
+    src: roles/gitlab-ce/templates/gitlab.rb.tpl
+    dest: /etc/gitlab/gitlab.rb
+    backup: yes
+    mode: 0600
+  notify:
+    - reconfigure gitlab
+    - copy root password
+
+- name: Flush handlers
+  meta: flush_handlers
+
+- name: Remove loopback hostname from /etc/hosts
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '^127\..*{{ ansible_nodename }}\s+{{ ansible_nodename }}$'
+    state: absent
+
+- name: Update /etc/hosts
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '^{{ item["ip"] | regex_escape() }}\s+{{ item["fqdn"] | regex_escape() }}\s+{{ item["fqdn"].split(".")[0] }}$'
+    line: '{{ item["ip"] }} {{ item["fqdn"] }} {{ item["fqdn"].split(".")[0] }}'
+    state: present
+  with_items:
+    - ip: 192.168.50.50
+      fqdn: gitlab.example.com
+    - ip: 192.168.50.51
+      fqdn: gitlab-runner.example.com
+
+- name: Get Gitlab runner registration token
+  command: gitlab-rails runner -e production "puts Gitlab::CurrentSettings.current_application_settings.runners_registration_token"
+  register: gitlab_runner_registration_token_raw
+
+- name: Copy the runner registration script
+  copy:
+    src: roles/gitlab-ce/files/register-runner.py
+    dest: /root/register-runner.py
+    mode: 0755
+
+- name: Register the runner
+  shell: "/root/register-runner.py '{{ gitlab_runner_registration_token_raw.stdout_lines[0] }}'"
+  args:
+    chdir: /root
+    creates: runner-auth-token
+
+- name: Get the runner auth token
+  command: cat /root/runner-auth-token
+  register: gitlab_runner_authentication_token_raw
+
+- name: Set the runner auth token fact
+  set_fact:
+    gitlab_runner_authentication_token: "{{ gitlab_runner_authentication_token_raw.stdout_lines[0] }}"
+
+- name: Copy the Gitlab admin service account token for Kubernetes
+  copy:
+    src: roles/gitlab-ce/files/gitlab-k8s-admin-token
+    dest: /root/gitlab-k8s-admin-token
+    mode: 0600
+
+- name: Copy the Kubernetes CA certificate
+  copy:
+    src: roles/gitlab-ce/files/k8s-ca-certificate
+    dest: /root/k8s-ca-certificate
+    mode: 0600
+
+- name: Copy the Kubernetes cluster registration script
+  copy:
+    src: roles/gitlab-ce/files/register-k8s.py
+    dest: /root/register-k8s.py
+    mode: 0755
+
+- name: Register the Kubernetes cluster
+  shell: '/root/register-k8s.py "$(cat /root/gitlab-k8s-admin-token)" "$(cat /root/k8s-ca-certificate)"'
+  args:
+    chdir: /root
+    creates: register-k8s.log

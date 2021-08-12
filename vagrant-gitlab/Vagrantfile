@@ -1,0 +1,79 @@
+# frozen_string_literal: true
+
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+IMAGE_NAME = 'bento/ubuntu-20.04'
+PROVIDER = ENV['PROVIDER'] || 'virtualbox'
+
+# noinspection RubyResolve
+# rubocop:disable Metrics/BlockLength
+Vagrant.configure('2') do |config|
+  # noinspection RubyResolve
+  config.vm.define 'gitlab-ce' do |gitlab|
+    gitlab.vm.box = IMAGE_NAME
+    gitlab.vm.network 'private_network', ip: '192.168.50.50'
+    gitlab.vm.hostname = 'gitlab-ce'
+    # noinspection RubyResolve
+    gitlab.vm.provider PROVIDER do |v|
+      v.memory = 4096
+      v.cpus = 2
+    end
+  end
+
+  # noinspection RubyResolve
+  config.vm.define 'gitlab-runner' do |runner|
+    runner.vm.box = IMAGE_NAME
+    runner.vm.network 'private_network', ip: '192.168.50.51'
+    runner.vm.hostname = 'gitlab-runner'
+    # noinspection RubyResolve
+    runner.vm.provider PROVIDER do |v|
+      v.memory = 2048
+      v.cpus = 2
+    end
+  end
+
+  # noinspection RubyResolve
+  config.vm.define 'controller' do |controller|
+    # noinspection DuplicatedCode
+    controller.vm.box = IMAGE_NAME
+    controller.vm.network 'private_network', ip: '192.168.50.6'
+    controller.vm.hostname = 'controller'
+    # noinspection RubyResolve
+    controller.vm.provider PROVIDER do |v|
+      v.memory = 1024
+      v.cpus = 1
+    end
+
+    # noinspection RubyResolve
+    if Vagrant::Util::Platform.windows?
+      config.vm.synced_folder '../', '/vagrant', owner: 'vagrant', mount_options: ['dmode=700,fmode=600']
+    else
+      config.vm.synced_folder '../', '/vagrant', owner: 'vagrant'
+    end
+
+    # noinspection RubyResolve
+    controller.vm.provision :ansible_local do |ansible|
+      ansible.playbook = 'vagrant-gitlab/provisioning/playbook.yml'
+      ansible.config_file = 'vagrant-gitlab/provisioning/ansible.cfg'
+      ansible.install = true
+      ansible.become = true
+      ansible.limit = 'all'
+      ansible.groups = {
+        'gitlab' => ['gitlab-ce'],
+        'runner' => ['gitlab-runner']
+      }
+      ansible.host_vars = {
+        'gitlab-ce' => {
+          'ansible_host' => '192.168.50.50',
+          'ansible_ssh_private_key_file' => "/vagrant/vagrant-gitlab/.vagrant/machines/gitlab-ce/#{PROVIDER}/private_key"
+        },
+        'gitlab-runner' => {
+          'ansible_host' => '192.168.50.51',
+          'ansible_ssh_private_key_file' => "/vagrant/vagrant-gitlab/.vagrant/machines/gitlab-runner/#{PROVIDER}/private_key"
+        }
+      }
+    end
+  end
+end
+# rubocop:enable Metrics/BlockLength

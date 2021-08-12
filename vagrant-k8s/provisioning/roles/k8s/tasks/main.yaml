@@ -1,0 +1,11 @@
+---
+- name: Import common tasks
+  include_tasks: roles/k8s/tasks/common.yaml
+
+- name: Import master tasks
+  include_tasks: roles/k8s/tasks/master.yaml
+  when: "'master' in group_names"
+
+- name: Import node tasks
+  include_tasks: roles/k8s/tasks/node.yaml
+  when: "'nodes' in group_names"

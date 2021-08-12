@@ -1,0 +1,190 @@
+---
+- name: Initialize the Kubernetes cluster using kubeadm
+  shell: "kubeadm init --apiserver-advertise-address=192.168.50.10 --apiserver-cert-extra-sans=192.168.50.10 --node-name k8s-master --pod-network-cidr=192.168.0.0/16 > /root/cluster.txt"
+  args:
+    creates: /root/cluster.txt
+
+- name: Create Kubernetes configuration directory for the vagrant user
+  file:
+    path: /home/vagrant/.kube
+    state: directory
+    mode: 0700
+    owner: vagrant
+    group: vagrant
+
+- name: Copy the kubeconfig into vagrant's configuration directory
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/vagrant/.kube/config
+    remote_src: yes
+    owner: vagrant
+    group: vagrant
+    mode: 0600
+
+# Configure a CNI plugin, Calico in this case.
+- name: Install Calico pod network
+  shell: "kubectl create -f https://docs.projectcalico.org/manifests/calico.yaml > cni-setup.txt"
+  become: no
+  args:
+    chdir: $HOME
+    creates: cni-setup.txt
+
+- name: Deploy NGINX ingress controller
+  shell: "kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v0.48.1/deploy/static/provider/baremetal/deploy.yaml > nginx.txt"
+  become: no
+  args:
+    chdir: $HOME
+    creates: nginx.txt
+
+- name: Copy NGINX ingress configuration
+  copy:
+    src: "roles/k8s/files/{{ item }}"
+    dest: "/tmp/{{ item }}"
+  with_items:
+    - ingress-options.yaml
+    - ingress-cleanup.yaml
+
+# Set some options for the NGINX ingress controller and allow it to run on the master node.
+- name: Apply NGINX ingress configuration
+  shell: 'kubectl -n ingress-nginx patch deployment ingress-nginx-controller --patch "$(cat /tmp/ingress-options.yaml)"'
+  become: no
+
+- name: Clean up completed NGINX setup jobs
+  shell: 'kubectl -n ingress-nginx patch job {{ item }} --patch "$(cat /tmp/ingress-cleanup.yaml)" || true'
+  become: no
+  with_items:
+    - ingress-nginx-admission-create
+    - ingress-nginx-admission-patch
+
+- name: Label master node as frontend
+  command: kubectl label node k8s-master frontend=true --overwrite=true
+  become: no
+
+- name: Get join command
+  shell: kubeadm token create --print-join-command
+  register: join_command_raw
+
+- name: Set join command
+  set_fact:
+    join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+- name: Copy kubeconfig to host
+  fetch:
+    src: /home/vagrant/.kube/config
+    dest: "{{ playbook_dir }}/../kubeconfig"
+    flat: yes
+  become: no
+
+- name: Install NFS kernel server
+  apt:
+    name: nfs-kernel-server
+    state: present
+
+- name: Create shared NFS directory
+  file:
+    path: /srv/nfs
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: 0755
+
+- name: Share data directory with NFS
+  lineinfile:
+    path: /etc/exports
+    regexp: '^/srv/nfs\s+192\.168\.50\.0/24.*'
+    line: '/srv/nfs 192.168.50.0/24(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)'
+  notify:
+    - re-export nfs
+
+- name: Flush handlers
+  meta: flush_handlers
+
+- name: Install Helm
+  command: snap install helm --classic
+
+- name: Add the NFS subdir external provisioner Helm repository
+  command: helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
+  become: no
+
+- name: Deploy the NFS subdir external provisioner
+  shell: "helm install nfs-subdir-external-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner --set nfs.server=192.168.50.10 --set nfs.path=/srv/nfs --set storageClass.defaultClass=true > nfs-subdir.txt"
+  become: no
+  args:
+    chdir: $HOME
+    creates: nfs-subdir.txt
+
+- name: Create Gitlab admin service account YAML
+  copy:
+    src: roles/k8s/files/gitlab-admin-service-account.yaml
+    dest: /home/vagrant/gitlab-admin-service-account.yaml
+    owner: vagrant
+    group: vagrant
+    mode: 0644
+
+- name: Create Gitlab admin service account in Kubernetes
+  shell: "kubectl apply -f gitlab-admin-service-account.yaml > gitlab-admin.txt"
+  become: no
+  args:
+    chdir: $HOME
+    creates: gitlab-admin.txt
+
+- name: Get Gitlab admin account token
+  shell: "{% raw %}kubectl -n kube-system get secret $(kubectl -n kube-system get secret | grep gitlab | awk '{ print $1 }') -o 'go-template={{ index .data.token | base64decode }}'{% endraw %}"
+  become: no
+  register: gitlab_admin_account_token_raw
+
+- name: Write Gitlab admin token to file
+  copy:
+    content: "{{ gitlab_admin_account_token_raw.stdout_lines[0] }}"
+    dest: /home/vagrant/gitlab-admin-token
+    owner: vagrant
+    group: vagrant
+    mode: 0600
+
+- name: Get Kubernetes CA certificate
+  shell: "{% raw %}kubectl get secrets -o name | grep -E '^secret/default-token-\\w+' | xargs kubectl get -o 'go-template={{ index .data \"ca.crt\" | base64decode }}'{% endraw %}"
+  become: no
+  register: k8s_ca_certificate_raw
+
+- name: Write Kubernetes CA certificate to file
+  copy:
+    content: "{{ k8s_ca_certificate_raw.stdout_lines | join('\n') }}"
+    dest: /home/vagrant/k8s-ca-certificate
+    owner: vagrant
+    group: vagrant
+    mode: 0600
+
+- name: Download Gitlab admin token
+  fetch:
+    src: /home/vagrant/gitlab-admin-token
+    dest: "{{ playbook_dir }}/../../vagrant-gitlab/provisioning/roles/gitlab-ce/files/gitlab-k8s-admin-token"
+    flat: yes
+
+- name: Download Kubernetes CA certificate
+  fetch:
+    src: /home/vagrant/k8s-ca-certificate
+    dest: "{{ playbook_dir }}/../../vagrant-gitlab/provisioning/roles/gitlab-ce/files/k8s-ca-certificate"
+    flat: yes
+
+- name: Get Gitlab Prometheus values YAML
+  get_url:
+    url: https://gitlab.com/gitlab-org/project-templates/cluster-management/-/raw/master/applications/prometheus/values.yaml
+    dest: /home/vagrant/gitlab-prometheus-values.yaml
+    owner: vagrant
+    group: vagrant
+    mode: 0644
+
+- name: Create Gitlab managed apps namespace
+  shell: "kubectl create namespace gitlab-managed-apps || true"
+  become: no
+
+- name: Add Prometheus Helm repository
+  command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  become: no
+
+- name: Deploy Prometheus for Gitlab
+  shell: "helm install prometheus prometheus-community/prometheus -n gitlab-managed-apps --values gitlab-prometheus-values.yaml > gitlab-prometheus.txt"
+  become: no
+  args:
+    chdir: $HOME
+    creates: gitlab-prometheus.txt
