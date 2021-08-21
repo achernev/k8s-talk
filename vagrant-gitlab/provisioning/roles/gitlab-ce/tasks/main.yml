@@ -126,17 +126,14 @@
   set_fact:
     gitlab_runner_authentication_token: "{{ gitlab_runner_authentication_token_raw.stdout_lines[0] }}"
 
-- name: Copy the Gitlab admin service account token for Kubernetes
+- name: Copy the Gitlab admin service account token and CA certificate for Kubernetes
   copy:
-    src: roles/gitlab-ce/files/gitlab-k8s-admin-token
-    dest: /root/gitlab-k8s-admin-token
+    src: "roles/gitlab-ce/files/{{ item }}"
+    dest: "/root/{{ item }}"
     mode: 0600
-
-- name: Copy the Kubernetes CA certificate
-  copy:
-    src: roles/gitlab-ce/files/k8s-ca-certificate
-    dest: /root/k8s-ca-certificate
-    mode: 0600
+  with_items:
+    - gitlab-k8s-admin-token
+    - k8s-ca-certificate
 
 - name: Copy the Kubernetes cluster registration script
   copy:

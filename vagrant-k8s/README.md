@@ -22,3 +22,7 @@ $env:KUBECONFIG = Resolve-Path kubeconfig
 # You can now execute kubectl.
 kubectl get pods -o wide --all-namespaces
 ```
+
+This setup uses the [NFS subdir external provisioner][1] for automatic provisioning of storage.
+
+[1]: https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner

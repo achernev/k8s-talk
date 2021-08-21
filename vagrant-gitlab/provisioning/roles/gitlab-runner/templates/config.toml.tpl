@@ -1,6 +1,6 @@
 # {{ ansible_managed }}
 
-concurrent = 1
+concurrent = 2
 check_interval = 0
 
 [session_server]

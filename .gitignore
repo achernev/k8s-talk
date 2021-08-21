@@ -1,5 +1,8 @@
+# Vim swap files.
 *.sw[op]
-/.idea
+
+# macOS files.
+.DS_Store
 
 # EasyRSA.
 /easyrsa/*
@@ -21,3 +24,9 @@
 # Gitlab certificate directory.
 /vagrant-gitlab/provisioning/roles/common/files/*
 !/vagrant-gitlab/provisioning/roles/common/files/.gitkeep
+
+# Python virtual environments.
+venv
+
+# JetBrains IDEs.
+.idea

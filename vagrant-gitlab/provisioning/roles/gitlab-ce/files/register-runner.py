@@ -25,6 +25,7 @@ ROOT_PWD_RE = re.compile(r'^Password: (\S+)$')
 TOKEN_OUTPUT = 'runner-auth-token'
 
 
+# noinspection DuplicatedCode
 def configure_logging():
     log_formatter = logging.Formatter('%(asctime)s %(levelname)-5.5s -- %(message)s')
     root_logger = logging.getLogger()
@@ -67,6 +68,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     runner_reg_token = sys.argv[1]
+    # noinspection DuplicatedCode
     root_password = get_root_password(pathlib.Path(ROOT_PWD))
 
     conn = http.client.HTTPSConnection(HOSTNAME)

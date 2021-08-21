@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 
-# {{ ansible_managed }}
-
 """
 Registers a Kubernetes cluster into Gitlab.
-The kubeconfig must exist at /home/vagrant/.kube/config.
-The password for the root user in Gitlab must also exist in /etc/gitlab/initial_root_password.
+The password for the root user in Gitlab must exist in /etc/gitlab/initial_root_password.
 """
 
 import re
@@ -27,6 +24,7 @@ ROOT_PWD = '/etc/gitlab/initial_root_password'
 ROOT_PWD_RE = re.compile(r'^Password: (\S+)$')
 
 
+# noinspection DuplicatedCode
 def configure_logging():
     log_formatter = logging.Formatter('%(asctime)s %(levelname)-5.5s -- %(message)s')
     root_logger = logging.getLogger()
@@ -41,7 +39,7 @@ def configure_logging():
     root_logger.setLevel(logging.DEBUG)
 
 
-def get_root_password(pwd_file_path: pathlib.Path):
+def get_root_password(pwd_file_path: pathlib.Path) -> str:
     if not os.path.isfile(pwd_file_path):
         logging.error('The Gitlab root password file does not exist: %s', pwd_file_path.absolute())
         sys.exit(1)
@@ -70,6 +68,7 @@ if __name__ == '__main__':
 
     admin_sa_token = sys.argv[1]
     k8s_ca_cert = sys.argv[2]
+    # noinspection DuplicatedCode
     root_password = get_root_password(pathlib.Path(ROOT_PWD))
 
     conn = http.client.HTTPSConnection(HOSTNAME)
@@ -95,13 +94,15 @@ if __name__ == '__main__':
     conn.request('PUT', '/api/v4/application/settings?allow_local_requests_from_web_hooks_and_services=true',
                  headers=headers)
     settings_resp = conn.getresponse()
-    logging.debug('Settings response body: %r', settings_resp.read())
 
     if settings_resp.status != 200:
         logging.error(f'An error code was returned whilst changing Gitlab settings: %s %s',
                       settings_resp.status, settings_resp.reason)
         logging.error(settings_resp.read().decode('utf-8'))
         sys.exit(1)
+
+    # Ensure you read() the response or else the next request will fail.
+    logging.debug('Settings response body: %r', settings_resp.read().decode('utf-8'))
 
     # Wait for a minute.
     # See:
@@ -114,9 +115,13 @@ if __name__ == '__main__':
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
     }
+
+    # The below configuration sets the cluster to unmanaged by Gitlab.
+    # This is done in order to allow configuring namespaces for the projects.
     body = {
         'name': CLUSTER_NAME,
         'domain': DOMAIN,
+        'managed': False,
         'platform_kubernetes_attributes': {
             'api_url': CLUSTER_ADDRESS,
             'token': admin_sa_token,
@@ -132,5 +137,5 @@ if __name__ == '__main__':
         logging.error(cluster_resp.read().decode('utf-8'))
         sys.exit(1)
 
-    logging.debug('Cluster response body: %r', cluster_resp.read())
+    logging.debug('Cluster response body: %r', cluster_resp.read().decode('utf-8'))
     logging.info('Finished registering the Kubernetes cluster.')

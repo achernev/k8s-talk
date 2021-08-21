@@ -2,7 +2,7 @@
 
 ## Getting EasyRSA
 
-This directory holds the PKI used for certifying the various servers used in this project.
+The `easyrsa` directory is there to house a PKI used for certifying the various servers used in this project.
 
 You must first install or download the EasyRSA package. On macOS with Homebrew you can do so with the following
 commands:
@@ -86,50 +86,4 @@ Please see the file `README.md` in the `vagrant-k8s` directory for information o
 Provided Kubernetes is up and functioning correctly, create the Gitlab and the runner VMs. To do so, run `vagrant up`
 in the `vagrant-gitlab` directory.
 
-## Creating Project in Gitlab
-
-Once the provisioning finishes you need to do some manual work.
-
-1. Add a line in your `/etc/hosts` (UNIX-likes) or `%WINDIR%\system32\drivers\etc\hosts` (Windows) file as follows:
-   ```
-   192.168.50.50 gitlab.example.com
-   ```
-2. Log on to Gitlab at https://gitlab.example.com/. Ignore the certificate warning and continue to the website.
-   The password for user `root` can be found in `vagrant-gitlab/gitlab-root-password`.
-3. Create a user for yourself in Gitlab. Mark yourself as an admin. Log on with that user.
-4. Create an empty project.
-5. Go to Settings -> CI/CD of that project.
-6. Add the following variables in the appropriate section.
-
-   | Name                           | Value      | Description                                                              |
-   | ------------------------------ | ---------- | ------------------------------------------------------------------------ |
-   | `BROWSER_PERFORMANCE_DISABLED` | `true`     | Disable browser performance testing.                                     |
-   | `CODE_QUALITY_DISABLED`        | `true`     | Disable code quality metrics (these take a long time to complete).       |
-   | `DOCKER_DRIVER`                | `overlay2` | Docker storage driver.                                                   |
-   | `DOCKER_TLS_CERTDIR`           | `/certs`   | Docker TLS certificate directory.                                        |
-   | `POSTGRES_ENABLED`             | `false`    | Disable automatic deployment of PostgreSQL (part of Gitlab Auto DevOps). |
-   | `TEST_DISABLED`                | `true`     | Disable the Herokuish automatic tests (these don't support Python).      |
-
-   For more information please refer to the [Auto DevOps customisation documentation][2].
-
-## Additional Information
-
-Please see the [auto deploy app notes][3] for how to structure the Helm chart. Please note that the default template
-created by `helm create` differs slightly from the one expected by Gitlab. More specifically, in the values file,
-the `imagePullSecrets` top-level element must be renamed to
-`image.secrets`. This also needs to be reflected in the part in the templates which uses those secrets.
-
-You must also override the name of the chart for the auto-deploy step to succeed. Create a file in your project
-named `.gitlab/auto-deploy-values.yaml` which includes the line:
-
-```yaml
-# Used to work around an eccentricity of Gitlab Auto DevOps.
-fullnameOverride: "production"
-```
-
-The Kubernetes setup uses the [NFS subdir external provisioner][4] for automatic provisioning of storage.
-
 [1]: https://github.com/OpenVPN/easy-rsa/releases/
-[2]: https://docs.gitlab.com/ee/topics/autodevops/customize.html
-[3]: https://gitlab.com/gitlab-org/cluster-integration/auto-deploy-image/-/tree/master/assets/auto-deploy-app
-[4]: https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner
