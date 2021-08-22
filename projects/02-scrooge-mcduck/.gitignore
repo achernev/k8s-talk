@@ -1,0 +1,8 @@
+/venv
+/dist
+/.idea
+/chart/charts/*
+!/chart/charts/.gitkeep
+__pycache__
+*.sw[op]
+celerybeat-schedule

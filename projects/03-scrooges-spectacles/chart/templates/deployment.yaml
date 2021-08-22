@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scrooges-spectacles.fullname" . }}
+  labels:
+    {{- include "scrooges-spectacles.labels" . | nindent 4 }}
+  annotations:
+    {{- include "scrooges-spectacles.gitlabAnnotations" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "scrooges-spectacles.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "scrooges-spectacles.gitlabAnnotations" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "scrooges-spectacles.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.image.secrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "scrooges-spectacles.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SCROOGE_SQL_HOSTNAME
+              value: {{ (printf "%s-postgresql" .Values.global.scrooge.environment) | quote }}
+            - name: SCROOGE_SQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (printf "%s-postgresql" .Values.global.scrooge.environment) | quote }}
+                  key: postgresql-password
+            - name: SCROOGE_SQL_URI
+              value: "postgresql+psycopg2://postgres:$(SCROOGE_SQL_PASSWORD)@$(SCROOGE_SQL_HOSTNAME):5432/{{ .Values.global.scrooge.database }}"
+            - name: SCROOGE_MQ_HOSTNAME
+              value: {{ (printf "%s-rabbitmq" .Values.global.scrooge.environment) | quote }}
+            - name: SCROOGE_MQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (printf "%s-rabbitmq" .Values.global.scrooge.environment) | quote }}
+                  key: rabbitmq-password
+            - name: SCROOGE_BROKER_URL
+              value: "pyamqp://user:$(SCROOGE_MQ_PASSWORD)@$(SCROOGE_MQ_HOSTNAME):5672"
+          {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /hello
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /hello
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

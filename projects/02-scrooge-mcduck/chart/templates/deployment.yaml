@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scrooge-mcduck.fullname" . }}
+  labels:
+    {{- include "scrooge-mcduck.labels" . | nindent 4 }}
+  annotations:
+    {{- include "scrooge-mcduck.gitlabAnnotations" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "scrooge-mcduck.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "scrooge-mcduck.gitlabAnnotations" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "scrooge-mcduck.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.image.secrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "scrooge-mcduck.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: {{ .Chart.Name }}-wait-for-postgresql
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SCROOGE_SQL_HOSTNAME
+              value: {{ include "call-nested" (list . "postgresql" "common.names.fullname") | quote }}
+            - name: SCROOGE_SQL_PORT
+              value: {{ include "call-nested" (list . "postgresql" "postgresql.port") | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - "/usr/app/wait-for-it.sh -h ${SCROOGE_SQL_HOSTNAME} -p ${SCROOGE_SQL_PORT} -t 0"
+        - name: {{ .Chart.Name }}-wait-for-rabbitmq
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SCROOGE_MQ_HOSTNAME
+              value: {{ include "call-nested" (list . "rabbitmq" "rabbitmq.fullname") | quote }}
+            - name: SCROOGE_MQ_PORT
+              value: {{ .Values.rabbitmq.service.port | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - "/usr/app/wait-for-it.sh -h ${SCROOGE_MQ_HOSTNAME} -p ${SCROOGE_MQ_PORT} -t 0"
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SCROOGE_API_KEY
+              value: {{ .Values.apiKey | quote }}
+            - name: SCROOGE_SQL_HOSTNAME
+              value: {{ include "call-nested" (list . "postgresql" "common.names.fullname") | quote }}
+            - name: SCROOGE_SQL_PORT
+              value: {{ include "call-nested" (list . "postgresql" "postgresql.port") | quote }}
+            - name: SCROOGE_SQL_USERNAME
+              value: {{ include "call-nested" (list . "postgresql" "postgresql.username") | quote }}
+            - name: SCROOGE_SQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "call-nested" (list . "postgresql" "postgresql.secretName") }}
+                  key: postgresql-password
+            - name: SCROOGE_SQL_DATABASE
+              value: {{ include "call-nested" (list . "postgresql" "postgresql.database") | quote }}
+            - name: SCROOGE_SQL_URI
+              value: "postgresql+psycopg2://$(SCROOGE_SQL_USERNAME):$(SCROOGE_SQL_PASSWORD)@$(SCROOGE_SQL_HOSTNAME):$(SCROOGE_SQL_PORT)/$(SCROOGE_SQL_DATABASE)"
+            - name: SCROOGE_MQ_HOSTNAME
+              value: {{ include "call-nested" (list . "rabbitmq" "rabbitmq.fullname") | quote }}
+            - name: SCROOGE_MQ_PORT
+              value: {{ .Values.rabbitmq.service.port | quote }}
+            - name: SCROOGE_MQ_USERNAME
+              value: {{ .Values.rabbitmq.auth.username | quote }}
+            - name: SCROOGE_MQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "call-nested" (list . "rabbitmq" "rabbitmq.secretPasswordName") }}
+                  key: rabbitmq-password
+            - name: SCROOGE_BROKER_URL
+              value: "pyamqp://$(SCROOGE_MQ_USERNAME):$(SCROOGE_MQ_PASSWORD)@$(SCROOGE_MQ_HOSTNAME):$(SCROOGE_MQ_PORT)"
+          {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "/usr/local/bin/celery -A scrooge.celeryapp inspect ping -d celery@$HOSTNAME"
+            initialDelaySeconds: 30 # Start-up takes some time.
+            periodSeconds: 60 # Default is quite often and celery uses a lot CPU/RAM in that case.
+            timeoutSeconds: 10 # Default is too short.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "/usr/local/bin/celery -A scrooge.celeryapp inspect ping -d celery@$HOSTNAME"
+            initialDelaySeconds: 30 # Start-up takes some time.
+            periodSeconds: 60 # Default is quite often and celery uses a lot CPU/RAM in that case.
+            timeoutSeconds: 10 # Default is too short.
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

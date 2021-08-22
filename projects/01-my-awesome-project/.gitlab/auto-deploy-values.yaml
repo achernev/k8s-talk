@@ -1,0 +1,2 @@
+# Used to work around an eccentricity of Gitlab AutoDevops.
+fullnameOverride: "production"

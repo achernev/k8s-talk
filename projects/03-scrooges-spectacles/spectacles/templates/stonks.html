@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% block header %}
+    <h1 class="uk-heading-bullet">{% block title %}Stonks{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+    <div class="uk-flex uk-padding uk-grid">
+        {% for stonk in stonks %}
+            <div class="uk-card uk-card-default uk-card-body uk-card-hover uk-margin-left uk-margin-bottom">
+                <h3 class="uk-card-title uk-margin-remove-bottom">{{ stonk['symbol'] }}</h3>
+                <div class="uk-text-meta">{{ stonk['name'] }} ({{ stonk['exchange'] }})</div>
+                <div class="uk-text-small uk-text-light">
+                    <table class="uk-table uk-table-striped uk-table-small">
+                        <thead>
+                        <tr>
+                            <th>ts</th>
+                            <th>bid</th>
+                            <th>ask</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for price in stonk.prices[:3] %}
+                            <tr>
+                                <td>{{ price.ts }}</td>
+                                <td>{{ price.bid }}</td>
+                                <td>{{ price.ask }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endfor %}
+        <div class="uk-card uk-card-default uk-card-body uk-card-hover uk-margin-left uk-margin-bottom">
+            <h3 class="uk-card-title uk-margin-bottom">Add a new stonk</h3>
+            <form action="{{ url_for('stonk.new_stonk') }}" method="post" novalidate>
+                {{ form.hidden_tag() }}
+                <fieldset class="uk-fieldset">
+                    <div class="uk-margin">
+                        <div class="uk-inline">
+                            <span class="uk-form-icon" data-uk-icon="icon: plus-circle"></span>
+                            <!--suppress HtmlFormInputWithoutLabel -->
+                            {{ form.symbol(class_="uk-input uk-form-width-medium", placeholder="New stonk symbol") }}
+                        </div>
+                    </div>
+                </fieldset>
+            </form>
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,7 @@
+/chart
+/venv
+/.gitignore
+/.idea
+/README.md
+__pycache__
+*.sw[op]

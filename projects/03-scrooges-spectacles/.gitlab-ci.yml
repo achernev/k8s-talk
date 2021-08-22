@@ -1,0 +1,76 @@
+# Use the built-in Gitlab Auto DevOps build method.
+# In this case, detecting a Dockerfile will cause an image to be generated and
+# uploaded to the Gitlab container registry.
+include:
+  - template: Jobs/Build.gitlab-ci.yml
+  - template: Jobs/Deploy.gitlab-ci.yml
+
+variables:
+  CA_CERT: "/certs/easyrsa/ca.crt"
+  # These are needed inside the DinD build for the container image
+  # in order to authenticate to the GitLab package registry.
+  AUTO_DEVOPS_BUILD_IMAGE_FORWARDED_CI_VARIABLES: "CI_REGISTRY_USER,CI_JOB_TOKEN"
+  # Do not deploy the built-in Gitlab PostgreSQL.
+  POSTGRES_ENABLED: "false"
+  # Pass the vars needed for integration with the environments board.
+  HELM_UPGRADE_EXTRA_ARGS: "--set global.gitlab.app=$CI_PROJECT_PATH_SLUG --set global.gitlab.env=$CI_ENVIRONMENT_SLUG"
+  # Disable the rollout status at the end of the deploy step because it fails for some strange reason.
+  ROLLOUT_STATUS_DISABLED: "true"
+
+# Pre-install the Gitlab leaf SSL certificate inside the Docker-in-Docker service
+# used to build the image, to avoid SSL verification problems.
+.dind-service: &dind-service
+  variables:
+    # Needed for TLS support in Docker.
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+
+  services:
+    - name: docker:dind
+      # Overriding the entrypoint of the container to install the certificate
+      # in the system store.
+      command:
+        - /bin/sh
+        - -c
+        - |
+          apk add --no-cache openssl
+          true | openssl s_client -showcerts -connect "${CI_REGISTRY}" > "/usr/local/share/ca-certificates/${CI_REGISTRY}.crt"
+          update-ca-certificates --fresh
+          dockerd-entrypoint.sh || exit
+
+stages:
+  - build
+  # You need to list all stages which are defined in the Deploy.gitlab-ci.yml template
+  # even though we are only using the "production" one.
+  - review
+  - cleanup
+  - staging
+  - canary
+  - production
+  - incremental rollout 10%
+  - incremental rollout 25%
+  - incremental rollout 50%
+  - incremental rollout 100%
+
+# Set an env var in the form <git-short-sha>-<YYmmdd>.<HHMMSS> (UTC)
+# to identify the commit which comprises the package version and the container image.
+before_script:
+  - apk add --no-cache git
+  - export CI_APPLICATION_TAG="$(git log -1 --format="%h")-$(TZ=UTC date -d @$(git log -1 --format="%ct") +%Y%m%d.%H%M%S)"
+  - 'echo "Application tag: ${CI_APPLICATION_TAG}"'
+
+# These steps only override certain aspects of the stages defined inside the
+# Auto DevOps build templates (see `include:` stanzas at the top).
+build:
+  <<: *dind-service
+  stage: build
+
+production:
+  environment:
+    name: spectacles
+    url: https://spectacles.$KUBE_INGRESS_BASE_DOMAIN
+    # The environment name does not identify the tier, so set it explicitly.
+    # See: https://docs.gitlab.com/ee/ci/yaml/index.html#environmentdeployment_tier
+    deployment_tier: production
+    kubernetes:
+      namespace: scrooge

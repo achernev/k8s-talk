@@ -1,0 +1,3 @@
+# Scrooge McDuck
+
+Duck tales!

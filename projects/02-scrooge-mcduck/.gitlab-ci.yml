@@ -1,0 +1,126 @@
+# Use the built-in Gitlab Auto DevOps build method.
+# In this case, detecting a Dockerfile will cause an image to be generated and
+# uploaded to the Gitlab container registry.
+include:
+  - template: Jobs/Build.gitlab-ci.yml
+  - template: Jobs/Deploy.gitlab-ci.yml
+
+variables:
+  CA_CERT: "/certs/easyrsa/ca.crt"
+  # This is needed inside the DinD build for the container image.
+  AUTO_DEVOPS_BUILD_IMAGE_FORWARDED_CI_VARIABLES: "CI_APPLICATION_TAG"
+  # Do not use the built-in Gitlab PostgreSQL, we brought our own.
+  POSTGRES_ENABLED: "false"
+  # Pass the API key from the preset project variable.
+  # Also pass the vars needed for integration with the environments board.
+  HELM_UPGRADE_EXTRA_ARGS: "--set apiKey=$SCROOGE_API_KEY --set global.gitlab.app=$CI_PROJECT_PATH_SLUG --set global.gitlab.env=$CI_ENVIRONMENT_SLUG"
+  # Disable the rollout status at the end of the deploy step because it fails for some strange reason.
+  ROLLOUT_STATUS_DISABLED: "true"
+
+# Pre-install the Gitlab leaf SSL certificate inside the Docker-in-Docker service
+# used to build the image, to avoid SSL verification problems.
+.dind-service: &dind-service
+  variables:
+    # Needed for TLS support in Docker.
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+
+  services:
+    - name: docker:dind
+      # Overriding the entrypoint of the container to install the certificate
+      # in the system store.
+      command:
+        - /bin/sh
+        - -c
+        - |
+          apk add --no-cache openssl
+          true | openssl s_client -showcerts -connect "${CI_REGISTRY}" > "/usr/local/share/ca-certificates/${CI_REGISTRY}.crt"
+          update-ca-certificates --fresh
+          dockerd-entrypoint.sh || exit
+
+stages:
+  - build
+  # You need to list all stages which are defined in the Deploy.gitlab-ci.yml template
+  # even though we are only using the "production" one.
+  - review
+  - cleanup
+  - staging
+  - canary
+  - production
+  - incremental rollout 10%
+  - incremental rollout 25%
+  - incremental rollout 50%
+  - incremental rollout 100%
+
+# Build a Python package separately from the container image.
+# This is done to export the SQLAlchemy models for use in the UI project.
+wheel:
+  # Placing this step in the same stage as the one below causes them
+  # to be executed in parallel.
+  stage: build
+  image: python:3.9-slim
+
+  # The python:3.9-slim image is based on Debian bullseye, so we must use Apt.
+  # This variable identifies the commit in the form <git-short-sha>-<YYmmdd>.<HHMMSS> (UTC).
+  # The $CI_APPLICATION_TAG variable is used in `setup.py`.
+  before_script:
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y git
+    - export CI_APPLICATION_TAG="$(git log -1 --format="%h")-$(TZ=UTC date -d @$(git log -1 --format="%ct") +%Y%m%d.%H%M%S)"
+    - 'echo "Application tag: ${CI_APPLICATION_TAG}"'
+
+  script:
+    # Twine trusts only CA certificates and not leaf ones, hence this contortion.
+    - export CA_CERT_DIR="$(basename "$(dirname "${CA_CERT}")")"
+    - mkdir -p "/usr/local/share/ca-certificates/${CA_CERT_DIR}"
+    - cp "${CA_CERT}" "/usr/local/share/ca-certificates/${CA_CERT_DIR}/ca.crt"
+    - echo "${CA_CERT_DIR}/ca.crt" >> /etc/ca-certificates.conf
+    - update-ca-certificates --fresh
+    # Install build tools.
+    - pip3 install --no-cache-dir --upgrade build twine
+    # Build the package according to configuration included in the project.
+    - python3 -m build
+    # Apparently requests/certifi have their own immutable certificate store,
+    # so we override where Twine should look for those.
+    - >
+      TWINE_CERT=/etc/ssl/certs
+      TWINE_PASSWORD="${CI_JOB_TOKEN}"
+      TWINE_USERNAME=gitlab-ci-token
+      python3 -m twine upload
+      --repository-url "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
+      dist/*
+
+# These steps only override certain aspects of the stages defined inside the
+# Auto DevOps build templates (see `include:` stanzas at the top).
+build:
+  <<: *dind-service
+  stage: build
+
+  # Set an env var in the form <git-short-sha>-<YYmmdd>.<HHMMSS> (UTC)
+  # to identify the commit which comprises the package version and the container image.
+  before_script:
+    - apk add --no-cache git
+    - export CI_APPLICATION_TAG="$(git log -1 --format="%h")-$(TZ=UTC date -d @$(git log -1 --format="%ct") +%Y%m%d.%H%M%S)"
+    - 'echo "Application tag: ${CI_APPLICATION_TAG}"'
+
+production:
+  environment:
+    name: scrooge-mcduck
+    # The environment name does not identify the tier, so set it explicitly.
+    # See: https://docs.gitlab.com/ee/ci/yaml/index.html#environmentdeployment_tier
+    deployment_tier: production
+    kubernetes:
+      # Override the Kubernetes namespace. The Kubernetes cluster must be set to unmanaged for this to have any effect.
+      namespace: scrooge
+
+  before_script:
+    - apk add --no-cache git
+    - export CI_APPLICATION_TAG="$(git log -1 --format="%h")-$(TZ=UTC date -d @$(git log -1 --format="%ct") +%Y%m%d.%H%M%S)"
+    - 'echo "Application tag: ${CI_APPLICATION_TAG}"'
+    # Additional flags required for upgrading RabbitMQ and PostgreSQL deployments.
+    - 'export RABBITMQ_PASSWORD="$(kubectl get secret --namespace "${KUBE_NAMESPACE}" "${CI_ENVIRONMENT_SLUG}-rabbitmq" -o jsonpath="{.data.rabbitmq-password}" | base64 -d)"'
+    - '[ -n "${RABBITMQ_PASSWORD}" ] && export HELM_UPGRADE_EXTRA_ARGS="${HELM_UPGRADE_EXTRA_ARGS} --set rabbitmq.auth.password=$RABBITMQ_PASSWORD"'
+    - 'export RABBITMQ_ERLANG_COOKIE="$(kubectl get secret --namespace "${KUBE_NAMESPACE}" "${CI_ENVIRONMENT_SLUG}-rabbitmq" -o jsonpath="{.data.rabbitmq-erlang-cookie}" | base64 -d)"'
+    - '[ -n "${RABBITMQ_ERLANG_COOKIE}" ] && export HELM_UPGRADE_EXTRA_ARGS="${HELM_UPGRADE_EXTRA_ARGS} --set rabbitmq.auth.erlangCookie=$RABBITMQ_ERLANG_COOKIE"'
+    - 'export POSTGRESQL_PASSWORD="$(kubectl get secret --namespace "${KUBE_NAMESPACE}" "${CI_ENVIRONMENT_SLUG}-postgresql" -o jsonpath="{.data.postgresql-password}" | base64 -d)"'
+    - '[ -n "${POSTGRESQL_PASSWORD}" ] && export HELM_UPGRADE_EXTRA_ARGS="${HELM_UPGRADE_EXTRA_ARGS} --set global.postgresql.postgresqlPassword=$POSTGRESQL_PASSWORD"'
