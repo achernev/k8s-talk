@@ -8,7 +8,7 @@ You must first install or download the EasyRSA package. On macOS with Homebrew y
 commands:
 
 ```shell
-brew install easyrsa
+brew install easy-rsa
 ```
 
 Other platforms may have their own packaging system equivalents, however please note that this documentation is based on
