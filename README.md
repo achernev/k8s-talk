@@ -48,15 +48,28 @@ easyrsa gen-req gitlab.example.com
 # Enter the CA root certificate password when prompted.
 easyrsa sign-req server gitlab.example.com
 
-# Decrypt the private key for the issued certificate for later use in Gitlab setup.
+# Generate a signing request for the Harbor instance.
+# Enter a memorable password when prompted.
+easyrsa gen-req registry.example.com
+
+# Sign the request.
+# Enter the CA root certificate password when prompted.
+easyrsa sign-req server registry.example.com
+
+# Decrypt the private keys for the issued certificates for later use in Gitlab and Harbor setup.
 openssl rsa -in easyrsa/private/gitlab.example.com.key -out easyrsa/private/gitlab.example.com-decrypted.key
+openssl rsa -in easyrsa/private/registry.example.com.key -out easyrsa/private/registry.example.com-decrypted.key
 chmod 0600 easyrsa/private/gitlab.example.com-decrypted.key
+chmod 0600 easyrsa/private/registry.example.com-decrypted.key
 
 # Copy the certificates in place for the provisioning of VMs.
 cp easyrsa/ca.crt vagrant-k8s/provisioning/roles/k8s/files/ca.crt
 cp easyrsa/ca.crt vagrant-gitlab/provisioning/roles/common/files/ca.crt
 cp easyrsa/private/gitlab.example.com-decrypted.key vagrant-gitlab/provisioning/roles/common/files/gitlab.example.com.key
 cp easyrsa/issued/gitlab.example.com.crt vagrant-gitlab/provisioning/roles/common/files/gitlab.example.com.crt
+# Harbor
+cp easyrsa/private/registry.example.com-decrypted.key harbor/config/ssl/certs/registry.example.com.key
+cp easyrsa/issued/registry.example.com.crt harbor/config/ssl/certs/registry.example.com.crt
 ```
 
 ## Note on Vagrant Providers
