@@ -358,10 +358,10 @@ kubectl create rolebinding "${USERNAME}-${NAMESPACE}-admin" \
 
 API_SERVER="$(kubectl config view --minify | grep server | cut -f 2- -d ":" | tr -d " ")"
 
-kubectl config view --raw --minify | \
-  grep certificate-authority-data | \
-  awk -F: '{ print $2 }' | \
-  tr -d " " | \
+kubectl config view --raw --minify |
+  grep certificate-authority-data |
+  awk -F: '{ print $2 }' |
+  tr -d " " |
   base64 --decode >"${CLUSTER}-ca.crt"
 
 kubectl config set-cluster "${CLUSTER}" \
