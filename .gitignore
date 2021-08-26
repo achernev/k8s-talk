@@ -35,5 +35,9 @@ venv
 # JetBrains IDEs.
 .idea
 
-# Harbor
+# Harbor.
 /harbor/data
+
+# Script output.
+/scripts/*
+!/scripts/*.sh
