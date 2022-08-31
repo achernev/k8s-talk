@@ -9,3 +9,23 @@
 - name: Import node tasks
   include_tasks: roles/k8s/tasks/node.yaml
   when: "'nodes' in group_names"
+
+- name: Import MetalLB tasks
+  include_tasks: roles/k8s/tasks/metallb.yaml
+  when: "'master' in group_names"
+
+- name: Import Istio tasks
+  include_tasks: roles/k8s/tasks/istio.yaml
+  when: "'master' in group_names"
+
+- name: Import NFS provisioner tasks
+  include_tasks: roles/k8s/tasks/nfs.yaml
+  when: "'master' in group_names"
+
+- name: Import Gitlab tasks
+  include_tasks: roles/k8s/tasks/gitlab.yaml
+  when: "('master' in group_names and do_gitlab) | bool"
+
+- name: Import Prometheus tasks
+  include_tasks: roles/k8s/tasks/prometheus.yaml
+  when: "('master' in group_names and do_gitlab != True) | bool"

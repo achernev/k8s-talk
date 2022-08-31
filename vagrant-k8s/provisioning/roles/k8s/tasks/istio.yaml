@@ -1,0 +1,24 @@
+---
+- name: Add Istio Helm repository
+  command: helm repo add istio https://istio-release.storage.googleapis.com/charts
+  become: no
+
+- name: Deploy Istio base
+  command: helm upgrade --install istio-base istio/base -n istio-system --create-namespace
+  become: no
+
+- name: Deploy Istiod
+  command: helm upgrade --install istiod istio/istiod -n istio-system --wait
+  become: no
+
+- name: Create Istio ingress namespace
+  shell: "kubectl get namespace istio-ingress || kubectl create namespace istio-ingress"
+  become: no
+
+- name: Label Istio ingress namespace
+  command: kubectl label namespace istio-ingress istio-injection=enabled
+  become: no
+
+- name: Deploy Istio ingress
+  command: helm upgrade --install istio-ingress istio/gateway -n istio-ingress --wait
+  become: no

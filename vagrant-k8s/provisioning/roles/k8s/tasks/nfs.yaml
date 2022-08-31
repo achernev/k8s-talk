@@ -1,0 +1,32 @@
+---
+- name: Install NFS kernel server
+  apt:
+    name: nfs-kernel-server
+    state: present
+
+- name: Create shared NFS directory
+  file:
+    path: /srv/nfs
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: 0755
+
+- name: Share data directory with NFS
+  lineinfile:
+    path: /etc/exports
+    regexp: '^/srv/nfs\s+192\.168\.50\.0/24.*'
+    line: '/srv/nfs 192.168.50.0/24(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)'
+  notify:
+    - re-export nfs
+
+- name: Flush handlers
+  meta: flush_handlers
+
+- name: Add the NFS subdir external provisioner Helm repository
+  command: helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
+  become: no
+
+- name: Deploy the NFS subdir external provisioner
+  command: helm upgrade --install nfs-subdir-external-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner -n nfs-provisioner --create-namespace --set nfs.server=192.168.50.10 --set nfs.path=/srv/nfs --set storageClass.defaultClass=true
+  become: no

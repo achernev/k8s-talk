@@ -7,7 +7,7 @@ IMAGE_NAME = 'generic/ubuntu2204'
 NODES = 2
 K8S_VER = '1.25.0-00'
 GITLAB_ENABLED = false
-PROVIDER = ENV['PROVIDER'] || 'virtualbox'
+PROVIDER = ENV['PROVIDER'] || 'parallels'
 
 # Delete a potentially existing kubeconfig.
 # This is copied from the master once it is initialised.

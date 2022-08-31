@@ -1,0 +1,36 @@
+---
+- name: Set up kube-proxy for MetalLB
+  shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | sed -e "s/strictARP: false/strictARP: true/; s/mode: \"\"/mode: \"ipvs\"/" | kubectl apply -f - -n kube-system'
+  become: no
+
+- name: Create MetalLB namespace
+  shell: "kubectl get namespace metallb-system || kubectl create namespace metallb-system"
+  become: no
+
+- name: Label MetalLB namespace
+  command: "kubectl label namespace metallb-system {{ item }}"
+  become: no
+  with_items:
+    - pod-security.kubernetes.io/warn=privileged
+    - pod-security.kubernetes.io/audit=privileged
+    - pod-security.kubernetes.io/enforce=privileged
+
+- name: Add the MetalLB Helm repository
+  command: helm repo add metallb https://metallb.github.io/metallb
+  become: no
+
+- name: Deploy MetalLB
+  command: helm upgrade --install metallb metallb/metallb -n metallb-system --wait --set psp.create=false
+  become: no
+
+- name: Create MetalLB pool YAML
+  copy:
+    src: roles/k8s/files/metallb.yaml
+    dest: /home/vagrant/metallb.yaml
+    owner: vagrant
+    group: vagrant
+    mode: 0644
+
+- name: Apply MetalLB pool and advertisement
+  command: kubectl apply -f /home/vagrant/metallb.yaml
+  become: no

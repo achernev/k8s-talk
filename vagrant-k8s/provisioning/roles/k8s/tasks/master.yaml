@@ -1,13 +1,11 @@
 ---
-- name: Initialize the Kubernetes cluster using kubeadm
+- name: Install Helm
+  command: snap install helm --classic
+
+- name: Initialise the Kubernetes cluster using kubeadm
   command: kubeadm init --apiserver-advertise-address=192.168.50.10 --apiserver-cert-extra-sans=192.168.50.10 --node-name k8s-master --pod-network-cidr=192.168.0.0/16
   args:
     creates: /var/lib/kubelet/config.yaml
-  notify:
-    - flush dns caches
-
-- name: Flush handlers
-  meta: flush_handlers
 
 - name: Create Kubernetes configuration directory for the vagrant user
   file:
@@ -34,33 +32,7 @@
     chdir: $HOME
     creates: cni-setup.txt
 
-- name: Label master node as frontend
-  command: kubectl label node k8s-master frontend=true --overwrite=true
-  become: no
-
-- name: Install Helm
-  command: snap install helm --classic
-
-- name: Add Istio Helm repository
-  command: helm repo add istio https://istio-release.storage.googleapis.com/charts
-  become: no
-
-- name: Deploy Istio base
-  command: helm upgrade --install istio-base istio/base -n istio-system --create-namespace
-  become: no
-
-- name: Deploy Istiod
-  command: helm upgrade --install istiod istio/istiod -n istio-system --wait
-  become: no
-
-- name: Add NGINX ingress controller Helm repository
-  command: helm repo add nginx-stable https://helm.nginx.com/stable
-  become: no
-
-- name: Deploy NGINX ingress controller
-  command: helm upgrade --install nginx-ingress nginx-stable/nginx-ingress -n nginx-ingress --create-namespace --set controller.hostNetwork=true --set-string controller.nodeSelector.frontend=true --set controller.tolerations[0].key=node-role.kubernetes.io/control-plane --set controller.tolerations[0].operator=Exists --set controller.tolerations[0].effect=NoSchedule
-  become: no
-
+# Record the join command for use on nodes.
 - name: Get join command
   shell: kubeadm token create --print-join-command
   register: join_command_raw
@@ -75,49 +47,3 @@
     dest: "{{ playbook_dir }}/../kubeconfig"
     flat: yes
   become: no
-
-- name: Install NFS kernel server
-  apt:
-    name: nfs-kernel-server
-    state: present
-
-- name: Create shared NFS directory
-  file:
-    path: /srv/nfs
-    state: directory
-    owner: vagrant
-    group: vagrant
-    mode: 0755
-
-- name: Share data directory with NFS
-  lineinfile:
-    path: /etc/exports
-    regexp: '^/srv/nfs\s+192\.168\.50\.0/24.*'
-    line: '/srv/nfs 192.168.50.0/24(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)'
-  notify:
-    - re-export nfs
-
-- name: Flush handlers
-  meta: flush_handlers
-
-- name: Add the NFS subdir external provisioner Helm repository
-  command: helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
-  become: no
-
-- name: Deploy the NFS subdir external provisioner
-  command: helm upgrade --install nfs-subdir-external-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner -n nfs-provisioner --create-namespace --set nfs.server=192.168.50.10 --set nfs.path=/srv/nfs --set storageClass.defaultClass=true
-  become: no
-
-- name: Import Gitlab tasks
-  include_tasks: roles/k8s/tasks/gitlab.yaml
-  when: do_gitlab
-
-- name: Add the Prometheus Community Helm repository
-  command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-  become: no
-  when: not do_gitlab
-
-- name: Deploy Prometheus stack
-  command: helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
-  become: no
-  when: not do_gitlab

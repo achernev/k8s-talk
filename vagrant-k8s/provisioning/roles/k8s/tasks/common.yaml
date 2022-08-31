@@ -1,4 +1,15 @@
 ---
+- name: Disable DNSSEC
+  replace:
+    path: /etc/systemd/resolved.conf
+    regexp: '^DNSSEC=.*$'
+    replace: 'DNSSEC=no'
+  notify:
+    - restart systemd-resolved
+
+- name: Flush handlers
+  meta: flush_handlers
+
 - name: Install prerequisite packages
   apt:
     name: "{{ packages }}"

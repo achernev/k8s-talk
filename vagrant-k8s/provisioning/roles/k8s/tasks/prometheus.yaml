@@ -1,0 +1,8 @@
+---
+- name: Add the Prometheus Community Helm repository
+  command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  become: no
+
+- name: Deploy Prometheus stack
+  command: helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+  become: no
