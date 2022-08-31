@@ -4,3 +4,6 @@
 
 - name: update ca certs
   command: update-ca-certificates --fresh
+
+- name: flush dns caches
+  command: resolvectl flush-caches
