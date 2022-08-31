@@ -9,3 +9,6 @@
   service:
     name: systemd-resolved
     state: restarted
+
+- name: generate locales
+  command: locale-gen
